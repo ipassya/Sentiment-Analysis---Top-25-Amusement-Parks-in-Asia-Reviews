@@ -135,24 +135,11 @@ server <- function(input, output) {
     return(prediction)
   })
   
-  create_dtm <- function(data) {
-    corpus <- Corpus(VectorSource(data))
-    
-    corpus_clean <- corpus %>%
-      tm_map(content_transformer(tolower)) %>% 
-      tm_map(removePunctuation) %>%
-      tm_map(removeNumbers) %>%
-      tm_map(removeWords, stopwords(kind="en")) %>%
-      tm_map(stripWhitespace)
-    
-    create_dtm <- corpus_clean %>%
-      DocumentTermMatrix(control=list(dictionary = features))
-  }
-  
-  dataWord <- reactive({
-    v <- sort(colSums(as.matrix(create_dtm(data()$review))), decreasing = TRUE)
-    data.frame(Kata=names(v), Jumlah=as.integer(v), row.names=NULL, stringsAsFactors = FALSE) %>%
-      filter(Jumlah > 0)
+  data_word <- reactive({
+    dtm <- TermDocumentMatrix(clean_data(prediction_data()$review))
+    m <- as.matrix(dtm)
+    v <- sort(rowSums(m),decreasing=TRUE)
+    data.frame(word = names(v),n=v)
   })
   
   output$total_review <- renderValueBox({
@@ -182,18 +169,18 @@ server <- function(input, output) {
   
   # plot sentiment positive vs negative
   output$sentiment_contribution <- renderPlot({
-    sentiments <- dataWord() %>% 
-      inner_join(get_sentiments("bing"), by = c("Kata" = "word"))
+    sentiments <- data_word() %>% 
+      inner_join(get_sentiments("bing"), by = c("word" = "word"))
     
-    positive <- sentiments %>% filter(sentiment == "positive") %>% top_n(10, Jumlah) 
-    negative <- sentiments %>% filter(sentiment == "negative") %>% top_n(10, Jumlah)
+    positive <- sentiments %>% filter(sentiment == "positive") %>% top_n(10, n) 
+    negative <- sentiments %>% filter(sentiment == "negative") %>% top_n(10, n)
     sentiments <- rbind(positive, negative)
     
     sentiments <- sentiments %>%
-      mutate(Jumlah=ifelse(sentiment =="negative", -Jumlah, Jumlah))%>%
-      mutate(Kata = reorder(Kata, Jumlah))
+      mutate(n=ifelse(sentiment =="negative", -n, n))%>%
+      mutate(word = reorder(word, n))
     
-    ggplot(sentiments, aes(Kata, Jumlah, fill=sentiment))+
+    ggplot(sentiments, aes(word, n, fill=sentiment))+
       geom_bar(stat = "identity")+scale_fill_manual(values = c("#be1558", "#ff6684"))+
       theme(axis.text.x = element_text(angle = 90, hjust = 1))+
       ylab("Sentiment Contribution") + xlab("Word")
@@ -206,15 +193,17 @@ server <- function(input, output) {
   
   output$wordcloud <- renderPlot({
     data.corpus <- clean_data(data()$review)
-    wordcloud(data.corpus, min.freq = 30, max.words = 50)
+    wordcloud(data.corpus, min.freq = 5 , max.words = 200, random.order=F, 
+              rot.per=0.35)
   })
   
   output$word_count <- renderPlot({
-    countedWord <- dataWord() %>%
-      top_n(10, Jumlah) %>%
-      mutate(Kata = reorder(Kata, Jumlah))
+    countedWord <- data_word() %>%
+      top_n(10, n) %>%
+      mutate(word = reorder(word, n))
     
-    ggplot(countedWord, aes(Kata, Jumlah, fill = Jumlah)) + scale_fill_gradient(low="#ff6684", high="#be1558")+
+    ggplot(countedWord, aes(word, n, fill = n)) +
+      scale_fill_gradient(low="#ff6684", high="#be1558") +
       geom_col() +
       guides(fill = FALSE) +
       theme_minimal()+
